@@ -147,6 +147,9 @@ UPLOAD_HTML = """
   <p>Üretilen PDF'ler yalnızca <b>bilgi amaçlıdır</b>; belgelerin doğruluğu, güncelliği
   veya resmî geçerliliği için her zaman UYAP üzerindeki orijinal belgeyi esas alın.
   Dönüştürme sırasında oluşabilecek eksik/hatalı gösterimlerden site sorumlu tutulamaz.</p>
+  <p>Bu site, ziyaretçi sayısı gibi <b>anonim kullanım istatistiklerini</b> Google Analytics
+  ile ölçer; bu amaçla tarayıcınıza çerez (cookie) yerleştirilebilir. Yüklediğiniz belge
+  içerikleriyle ilgisi yoktur.</p>
 </div>
 
 <footer>by SEÇİL KORKMAZ</footer>
@@ -402,7 +405,7 @@ def convert():
 
     if not file.filename.lower().endswith(".udf"):
         return ERROR_HTML.format(
-            message="Bu bir .udf dosyası değil gibi görünüyor."
+            message="Bu bir .udf dosyası değil gibi görünüyor. Lütfen UYAP'tan indirdiğin orijinal .udf dosyasını yükle."
         ), 400
 
     try:
@@ -425,7 +428,9 @@ def convert():
 @app.errorhandler(413)
 def too_large(e):
     return ERROR_HTML.format(
-        message="Bu dosya çok büyük (25 MB üstü)."
+        message="Bu dosya çok büyük (25 MB üstü). Normal bir UDF dosyası genelde bunun çok altında olur — "
+                "büyük olması yanlışlıkla başka bir dosya (video, arşiv vb.) seçmiş olabileceğini gösteriyor olabilir. "
+                "Lütfen UYAP'tan indirdiğin gerçek .udf dosyasını yükle."
     ), 413
 
 
