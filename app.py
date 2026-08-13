@@ -425,9 +425,7 @@ def convert():
 @app.errorhandler(413)
 def too_large(e):
     return ERROR_HTML.format(
-        message="Bu dosya çok büyük (25 MB üstü). Normal bir UDF dosyası genelde bunun çok altında olur — "
-                "büyük olması yanlışlıkla başka bir dosya (video, arşiv vb.) seçmiş olabileceğini gösteriyor olabilir. "
-                "Lütfen UYAP'tan indirdiğin gerçek .udf dosyasını yükle."
+        message="Bu dosya çok büyük (25 MB üstü)."
     ), 413
 
 
