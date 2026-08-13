@@ -9,7 +9,7 @@ genellikle hiç desteklenmiyor. Bu araç, dosyanın içindeki gerçek metni ve
 fotoğrafları (varsa) doğrudan okuyup UYAP'ın kendi görünümüne yakın, hizalama ve
 kalın başlıkları koruyan bir PDF üretir — hiçbir ek program kurmaya gerek kalmadan.
 
-**Canlı demo:** https://udf-pdf-donusturucu.onrender.com 
+**Canlı demo:** (Render linkini buraya ekle)
 
 ## Özellikler
 
@@ -38,7 +38,7 @@ Tarayıcıda `http://127.0.0.1:5000` adresini aç.
 - [ReportLab](https://www.reportlab.com/) — PDF üretimi
 - [defusedxml](https://github.com/tiran/defusedxml) — güvenli XML ayrıştırma
 
-## Yasal not
+## Yasal Bilgilendirme
 
 Bu proje, Adalet Bakanlığı veya UYAP ile **resmî bir bağı olmayan**, bağımsız bir
 dönüştürme aracıdır. Üretilen PDF'ler yalnızca bilgi amaçlıdır; her zaman UYAP
