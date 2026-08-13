@@ -1,20 +1,56 @@
+"""
+UYAP UDF -> PDF Dönüştürücü (çalışan sürüm)
+
+NEDEN ÖNCEKİ KODLAR ÇALIŞMIYORDU?
+----------------------------------
+UDF dosyasının içindeki content.xml şu şekilde kurulu:
+
+    <template>
+      <content><![CDATA[ ... belgenin TÜM düz metni burada ... ]]></content>
+      <elements>
+        <paragraph ...>
+          <content startOffset="0" length="10" bold="true" .../>   <-- metin YOK, sadece
+          <field startOffset="18" length="8" fieldName="il_Ilce"/>     offset/uzunluk ve
+        </paragraph>                                                  biçim (kalın, hiza vs)
+      </elements>
+    </template>
+
+Yani gerçek metin SADECE en baştaki <content><![CDATA[...]]></content> bloğunda var.
+<elements> içindeki <paragraph>/<content>/<field> etiketlerinin ".text" özelliği
+hep None'dur (kendi kendine kapanan etiketler) — bu yüzden önceki kodlar "paragraph"
+etiketlerinden metin çekmeye çalışınca hep boş sayfa ya da hiç metin bulamıyordu.
+
+Ayrıca bu tür belgelerde (şartname, bilirkişi raporu metni vb.) resim/karekod GÖMÜLÜ
+DEĞİLDİR — karekod, UYAP'ın kendi yazdırma ekranında "uyapdogrulamakodu" değerinden
+anlık üretilir, dosyanın içinde bir görsel olarak saklanmaz. Araç fotoğrafları ise
+genelde AYRI bir .udf/.jpg dosyası olarak iner. Bu yüzden script hem content.xml'deki
+metni doğru çeker, hem de zip içinde gerçek resim dosyası varsa (varsa) onları da
+PDF'e ekler.
+
+KURULUM (ücretsiz):
+    pip install flask reportlab
+
+ÇALIŞTIRMA:
+    python app.py
+    -> tarayıcıda http://127.0.0.1:5000 aç
+"""
 
 import io
 import os
 import re
 import zipfile
 import defusedxml.ElementTree as ET  # normal ElementTree yerine: XML "bomba" / XXE saldırılarına karşı güvenli
- 
+
 from flask import Flask, request, send_file
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
- 
+
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # tek dosya için üst sınır: 25 MB (kötüye kullanım/DoS'a karşı)
- 
+
 # ---------------------------------------------------------------------------
 # 1) TÜRKÇE KARAKTER DESTEKLİ FONT BUL VE KAYDET
 #    (Standart PDF fontları ı, ğ, ş, İ gibi harfleri düzgün basmaz.
@@ -29,10 +65,10 @@ FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     os.path.join(os.path.dirname(__file__), "DejaVuSans.ttf"),
 ]
- 
+
 FONT_NAME = "Helvetica"  # reportlab dahili yedek (Türkçe karakterlerde sorun çıkarabilir)
 FONT_BOLD = "Helvetica-Bold"
- 
+
 for path in FONT_CANDIDATES:
     if os.path.exists(path):
         try:
@@ -43,13 +79,13 @@ for path in FONT_CANDIDATES:
             break
         except Exception:
             continue
- 
+
 if FONT_NAME == "Helvetica":
     print("UYARI: Türkçe karakter destekli bir font bulunamadı. "
           "ı/ğ/ş/İ gibi harfler hatalı çıkabilir. Çözüm için "
           "https://dejavu-fonts.github.io adresinden DejaVuSans.ttf indirip "
           "bu script ile aynı klasöre koyun.")
- 
+
 UPLOAD_HTML = """
 <!DOCTYPE html>
 <html lang="tr">
@@ -57,7 +93,7 @@ UPLOAD_HTML = """
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>UDF &rarr; PDF Dönüştürücü (Gayriresmî)</title>
- 
+
 <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-5W1K15TX5M"></script>
 <script>
@@ -81,7 +117,7 @@ UPLOAD_HTML = """
         cursor:pointer;font-weight:bold;font-size:16px;width:100%;margin-top:15px;transition:.2s}
  button:hover{background:#3a1418}
  #filename{margin-top:12px;color:#6b4d4f;font-weight:600;font-size:14px}
- 
+
  .legal{max-width:460px;width:100%;margin-top:22px;background:#241d1c;border-radius:10px;
         padding:18px 22px;box-shadow:0 4px 16px rgba(0,0,0,.3);font-size:12.5px;
         color:#c9b8b6;line-height:1.6;text-align:left;border-left:3px solid #7a1f2b}
@@ -101,7 +137,7 @@ UPLOAD_HTML = """
     <button type="submit">PDF'e Dönüştür ve İndir</button>
   </form>
 </div>
- 
+
 <div class="legal">
   <p><b>Bu site resmî bir UYAP/Adalet Bakanlığı hizmeti değildir.</b>
   Herkesin kullanabilmesi için hazırlanmış, bağımsız ve ücretsiz bir dönüştürme aracıdır.</p>
@@ -112,17 +148,17 @@ UPLOAD_HTML = """
   veya resmî geçerliliği için her zaman UYAP üzerindeki orijinal belgeyi esas alın.
   Dönüştürme sırasında oluşabilecek eksik/hatalı gösterimlerden site sorumlu tutulamaz.</p>
 </div>
- 
-<footer>Seçil Korkmaz tarafından, herkes için ücretsiz olarak hazırlanmıştır.</footer>
+
+<footer>by SEÇİL KORKMAZ</footer>
 </body>
 </html>
 """
- 
- 
+
+
 def extract_udf(file_bytes: bytes):
     """UDF (zip) içinden ham metni, biçim bilgisiyle paragrafları ve
     varsa resimleri çıkarır.
- 
+
     UDF yapısı:
       <content><![CDATA[ ... belgenin TÜM düz metni ... ]]></content>
       <elements>
@@ -136,7 +172,7 @@ def extract_udf(file_bytes: bytes):
         ...
         <footer>...</footer>
       </elements>
- 
+
     Gerçek metin SADECE <content><![CDATA[...]]></content> içinde var.
     <elements> içindeki her <paragraph>, o ana metnin hangi aralığının
     (startOffset/length) hangi biçimle (kalın, hizalama, madde işareti,
@@ -144,25 +180,25 @@ def extract_udf(file_bytes: bytes):
     imageData="..."/> attribute'u içinde base64 olarak gömülü.
     """
     import base64
- 
+
     with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
         names = z.namelist()
- 
+
         content_name = next((n for n in names if n.lower().endswith("content.xml")), None)
         if not content_name:
             raise ValueError(f"content.xml bulunamadı. Zip içeriği: {names}")
- 
+
         xml_bytes = z.read(content_name)
         root = ET.fromstring(xml_bytes)
- 
+
         content_el = root.find("content")
         full_text = content_el.text if content_el is not None else None
         if not full_text:
             raise ValueError("content.xml içinde <content> metni boş geldi.")
- 
+
         elements_el = root.find("elements")
         paragraphs = []  # her biri dict: {runs:[(text,bold,size)], images:[bytes,...], align, bulleted, indent}
- 
+
         def slice_text(start, length):
             try:
                 start = int(start)
@@ -170,7 +206,7 @@ def extract_udf(file_bytes: bytes):
                 return full_text[start:start + length]
             except Exception:
                 return ""
- 
+
         def process_paragraph(p_el):
             runs = []
             para_images = []
@@ -198,9 +234,9 @@ def extract_udf(file_bytes: bytes):
                 "bulleted": p_el.attrib.get("Bulleted") == "true",
                 "indent": float(p_el.attrib.get("LeftIndent", 0) or 0),
             })
- 
+
         header_text = ""  # her sayfanın tepesinde tekrarlanan küçük başlık
- 
+
         if elements_el is not None:
             for node in elements_el:
                 if node.tag == "header":
@@ -215,16 +251,16 @@ def extract_udf(file_bytes: bytes):
                 elif node.tag == "footer":
                     pass  # UDF'de footer sadece "sayfa no" yer tutucusu; gerçek sayı UYAP'ta otomatik basılıyor, biz de otomatik ekleyeceğiz
                 # 'styles' vb. diğer etiketler yok sayılır
- 
+
         # Zip içinde ayrıca gerçek resim dosyası varsa (nadir durum) sona ekle
         extra_images = []
         for n in names:
             if n.lower().endswith((".png", ".jpg", ".jpeg", ".bmp")):
                 extra_images.append(z.read(n))
- 
+
         return paragraphs, extra_images, header_text
- 
- 
+
+
 def build_pdf(paragraphs: list, extra_images: list, header_text: str = "") -> bytes:
     from reportlab.platypus import (BaseDocTemplate, PageTemplate, Frame,
                                      Paragraph, Spacer, Image, KeepTogether)
@@ -232,14 +268,14 @@ def build_pdf(paragraphs: list, extra_images: list, header_text: str = "") -> by
     from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
     from reportlab.lib.utils import ImageReader
     from xml.sax.saxutils import escape as xml_escape
- 
+
     ALIGN_MAP = {"0": TA_LEFT, "1": TA_CENTER, "2": TA_RIGHT, "3": TA_JUSTIFY}
- 
+
     buf = io.BytesIO()
     top_margin = 2.6 * cm if header_text else 1.8 * cm  # tekrarlanan başlığa yer aç
     frame = Frame(2 * cm, 1.8 * cm, A4[0] - 4 * cm, A4[1] - top_margin - 1.8 * cm,
                   id="body")
- 
+
     def draw_page_decorations(canvas_obj, doc_obj):
         canvas_obj.saveState()
         if header_text:
@@ -249,17 +285,17 @@ def build_pdf(paragraphs: list, extra_images: list, header_text: str = "") -> by
         canvas_obj.setFont(FONT_NAME, 9)
         canvas_obj.drawRightString(A4[0] - 2 * cm, 1.1 * cm, str(canvas_obj.getPageNumber()))
         canvas_obj.restoreState()
- 
+
     doc = BaseDocTemplate(buf, pagesize=A4)
     doc.addPageTemplates([PageTemplate(id="main", frames=[frame], onPage=draw_page_decorations)])
- 
+
     usable_width = A4[0] - 4 * cm
     flow = []
- 
+
     for para in paragraphs:
         runs = para["runs"]
         images = para["images"]
- 
+
         if runs:
             pieces = []
             max_size = 10.5
@@ -293,7 +329,7 @@ def build_pdf(paragraphs: list, extra_images: list, header_text: str = "") -> by
                 flow.append(Spacer(1, 6))
         elif not images:
             flow.append(Spacer(1, 6))
- 
+
         for img_bytes in images:
             try:
                 reader = ImageReader(io.BytesIO(img_bytes))
@@ -304,7 +340,7 @@ def build_pdf(paragraphs: list, extra_images: list, header_text: str = "") -> by
                 flow.append(Spacer(1, 8))
             except Exception:
                 pass
- 
+
     for img_bytes in extra_images:
         try:
             reader = ImageReader(io.BytesIO(img_bytes))
@@ -314,36 +350,87 @@ def build_pdf(paragraphs: list, extra_images: list, header_text: str = "") -> by
             flow.append(Spacer(1, 8))
         except Exception:
             pass
- 
+
     if not flow:
         flow.append(Paragraph("(Belge içeriği boş görünüyor)", ParagraphStyle("p", fontName=FONT_NAME)))
- 
+
     doc.build(flow)
     buf.seek(0)
     return buf.read()
- 
- 
+
+
+ERROR_HTML = """
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dönüştürülemedi</title>
+<style>
+ *{{box-sizing:border-box}}
+ body{{font-family:'Segoe UI',Tahoma,sans-serif;background:radial-gradient(circle at top,#2b2320 0%,#171213 70%);
+      margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}}
+ .card{{background:#fff;padding:36px;border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.45);
+       text-align:center;max-width:420px;width:100%;border-top:4px solid #7a1f2b}}
+ h2{{color:#3a1418;margin-top:0}}
+ p{{color:#5c4a48;line-height:1.5}}
+ a{{display:inline-block;margin-top:14px;background:#1f1b1a;color:#fff;text-decoration:none;
+    padding:12px 24px;border-radius:8px;font-weight:bold}}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>Bu dosya dönüştürülemedi</h2>
+  <p>{message}</p>
+  <a href="/">Geri Dön ve Tekrar Dene</a>
+</div>
+</body>
+</html>
+"""
+
+
 @app.route("/")
 def index():
     return UPLOAD_HTML
- 
- 
+
+
 @app.route("/convert", methods=["POST"])
 def convert():
     file = request.files.get("file")
     if not file or file.filename == "":
-        return "Dosya seçilmedi", 400
+        return ERROR_HTML.format(message="Herhangi bir dosya seçilmedi, lütfen tekrar deneyin."), 400
+
+    if not file.filename.lower().endswith(".udf"):
+        return ERROR_HTML.format(
+            message="Bu bir .udf dosyası değil gibi görünüyor. Lütfen UYAP'tan indirdiğin orijinal .udf dosyasını yükle."
+        ), 400
+
     try:
         paragraphs, extra_images, header_text = extract_udf(file.read())
         pdf_bytes = build_pdf(paragraphs, extra_images, header_text)
-    except Exception as e:
-        return f"<h2>Hata</h2><p>{e}</p><a href='/'>Geri dön</a>", 500
- 
+    except zipfile.BadZipFile:
+        return ERROR_HTML.format(
+            message="Dosya bozuk görünüyor ya da geçerli bir UDF dosyası değil. Lütfen dosyayı UYAP'tan tekrar indirip deneyin."
+        ), 400
+    except Exception:
+        return ERROR_HTML.format(
+            message="Beklenmeyen bir hata oluştu, bu dosya türü şu an desteklenmiyor olabilir."
+        ), 500
+
     out_name = re.sub(r"\.udf$", "", file.filename, flags=re.I) + ".pdf"
     return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf",
                       as_attachment=True, download_name=out_name)
- 
- 
+
+
+@app.errorhandler(413)
+def too_large(e):
+    return ERROR_HTML.format(
+        message="Bu dosya çok büyük (25 MB üstü). Normal bir UDF dosyası genelde bunun çok altında olur — "
+                "büyük olması yanlışlıkla başka bir dosya (video, arşiv vb.) seçmiş olabileceğini gösteriyor olabilir. "
+                "Lütfen UYAP'tan indirdiğin gerçek .udf dosyasını yükle."
+    ), 413
+
+
 if __name__ == "__main__":
     # UYARI: debug=True SADECE kendi bilgisayarında test ederken kullanılır.
     # Bir sunucuya/internete açarken MUTLAKA debug=False olmalı — açık kalırsa
@@ -351,4 +438,3 @@ if __name__ == "__main__":
     # konsolu). Aşağıda ortam değişkeninden otomatik ayarlanıyor.
     debug_mode = os.environ.get("FLASK_DEBUG", "0") == "1"
     app.run(debug=debug_mode, host="127.0.0.1", port=5000)
- 
