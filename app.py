@@ -402,7 +402,7 @@ def convert():
 
     if not file.filename.lower().endswith(".udf"):
         return ERROR_HTML.format(
-            message="Bu bir .udf dosyası değil gibi görünüyor. Lütfen UYAP'tan indirdiğin orijinal .udf dosyasını yükle."
+            message="Bu bir .udf dosyası değil gibi görünüyor."
         ), 400
 
     try:
