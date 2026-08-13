@@ -55,7 +55,17 @@ UPLOAD_HTML = """
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>UDF &rarr; PDF Dönüştürücü (Gayriresmî)</title>
+ 
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-5W1K15TX5M"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-5W1K15TX5M');
+</script>
 <style>
  *{box-sizing:border-box}
  body{font-family:'Segoe UI',Tahoma,sans-serif;background:radial-gradient(circle at top,#2b2320 0%,#171213 70%);
@@ -103,7 +113,7 @@ UPLOAD_HTML = """
   Dönüştürme sırasında oluşabilecek eksik/hatalı gösterimlerden site sorumlu tutulamaz.</p>
 </div>
  
-<footer>by SEÇİL KORKMAZ</footer>
+<footer>Seçil Korkmaz tarafından, herkes için ücretsiz olarak hazırlanmıştır.</footer>
 </body>
 </html>
 """
@@ -189,16 +199,21 @@ def extract_udf(file_bytes: bytes):
                 "indent": float(p_el.attrib.get("LeftIndent", 0) or 0),
             })
  
+        header_text = ""  # her sayfanın tepesinde tekrarlanan küçük başlık
+ 
         if elements_el is not None:
             for node in elements_el:
                 if node.tag == "header":
                     for p in node.findall("paragraph"):
-                        process_paragraph(p)
+                        for child in p:
+                            if child.tag in ("content", "field", "space"):
+                                header_text += slice_text(child.attrib.get("startOffset", 0),
+                                                           child.attrib.get("length", 0))
+                    header_text = header_text.strip()
                 elif node.tag == "paragraph":
                     process_paragraph(node)
                 elif node.tag == "footer":
-                    for p in node.findall("paragraph"):
-                        process_paragraph(p)
+                    pass  # UDF'de footer sadece "sayfa no" yer tutucusu; gerçek sayı UYAP'ta otomatik basılıyor, biz de otomatik ekleyeceğiz
                 # 'styles' vb. diğer etiketler yok sayılır
  
         # Zip içinde ayrıca gerçek resim dosyası varsa (nadir durum) sona ekle
@@ -207,11 +222,12 @@ def extract_udf(file_bytes: bytes):
             if n.lower().endswith((".png", ".jpg", ".jpeg", ".bmp")):
                 extra_images.append(z.read(n))
  
-        return paragraphs, extra_images
+        return paragraphs, extra_images, header_text
  
  
-def build_pdf(paragraphs: list, extra_images: list) -> bytes:
-    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Image, KeepTogether)
+def build_pdf(paragraphs: list, extra_images: list, header_text: str = "") -> bytes:
+    from reportlab.platypus import (BaseDocTemplate, PageTemplate, Frame,
+                                     Paragraph, Spacer, Image, KeepTogether)
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
     from reportlab.lib.utils import ImageReader
@@ -220,9 +236,22 @@ def build_pdf(paragraphs: list, extra_images: list) -> bytes:
     ALIGN_MAP = {"0": TA_LEFT, "1": TA_CENTER, "2": TA_RIGHT, "3": TA_JUSTIFY}
  
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4,
-                             leftMargin=2 * cm, rightMargin=2 * cm,
-                             topMargin=1.8 * cm, bottomMargin=1.8 * cm)
+    top_margin = 2.6 * cm if header_text else 1.8 * cm  # tekrarlanan başlığa yer aç
+    frame = Frame(2 * cm, 1.8 * cm, A4[0] - 4 * cm, A4[1] - top_margin - 1.8 * cm,
+                  id="body")
+ 
+    def draw_page_decorations(canvas_obj, doc_obj):
+        canvas_obj.saveState()
+        if header_text:
+            canvas_obj.setFont(FONT_NAME, 8)
+            canvas_obj.drawCentredString(A4[0] / 2, A4[1] - 1.3 * cm, header_text)
+        # UYAP orijinalinde de olduğu gibi her sayfaya otomatik sayfa numarası
+        canvas_obj.setFont(FONT_NAME, 9)
+        canvas_obj.drawRightString(A4[0] - 2 * cm, 1.1 * cm, str(canvas_obj.getPageNumber()))
+        canvas_obj.restoreState()
+ 
+    doc = BaseDocTemplate(buf, pagesize=A4)
+    doc.addPageTemplates([PageTemplate(id="main", frames=[frame], onPage=draw_page_decorations)])
  
     usable_width = A4[0] - 4 * cm
     flow = []
@@ -305,8 +334,8 @@ def convert():
     if not file or file.filename == "":
         return "Dosya seçilmedi", 400
     try:
-        paragraphs, extra_images = extract_udf(file.read())
-        pdf_bytes = build_pdf(paragraphs, extra_images)
+        paragraphs, extra_images, header_text = extract_udf(file.read())
+        pdf_bytes = build_pdf(paragraphs, extra_images, header_text)
     except Exception as e:
         return f"<h2>Hata</h2><p>{e}</p><a href='/'>Geri dön</a>", 500
  
