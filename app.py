@@ -1,7 +1,4 @@
 """
-UYAP UDF -> PDF Dönüştürücü (çalışan sürüm)
-
-NEDEN ÖNCEKİ KODLAR ÇALIŞMIYORDU?
 ----------------------------------
 UDF dosyasının içindeki content.xml şu şekilde kurulu:
 
@@ -93,6 +90,10 @@ UPLOAD_HTML = """
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>UDF &rarr; PDF Dönüştürücü (Gayriresmî)</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#7a1f2b">
+<link rel="icon" href="/static/icon-192.png">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
 
 <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-5W1K15TX5M"></script>
@@ -101,6 +102,13 @@ UPLOAD_HTML = """
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
   gtag('config', 'G-5W1K15TX5M');
+</script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
 </script>
 <style>
  *{box-sizing:border-box}
@@ -397,6 +405,30 @@ def index():
     return UPLOAD_HTML
 
 
+@app.route("/manifest.json")
+def manifest():
+    return {
+        "name": "UDF → PDF Dönüştürücü",
+        "short_name": "UDF→PDF",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#171213",
+        "theme_color": "#7a1f2b",
+        "icons": [
+            {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"},
+        ],
+    }
+
+
+@app.route("/sw.js")
+def service_worker():
+    # Minimal service worker: PWA'nın "yüklenebilir" sayılması için gerekli,
+    # herhangi bir önbellekleme yapmıyor, dosya hâlâ her seferinde sunucudan işleniyor.
+    js = "self.addEventListener('fetch', () => {});"
+    return app.response_class(js, mimetype="application/javascript")
+
+
 @app.route("/convert", methods=["POST"])
 def convert():
     file = request.files.get("file")
@@ -405,7 +437,7 @@ def convert():
 
     if not file.filename.lower().endswith(".udf"):
         return ERROR_HTML.format(
-            message="Bu bir .udf dosyası değil gibi görünüyor. Lütfen UYAP'tan indirdiğin orijinal .udf dosyasını yükle."
+            message="Bu bir .udf dosyası değil gibi görünüyor."
         ), 400
 
     try:
